@@ -23,7 +23,8 @@ from crawl4ai import (
     BrowserConfig,
     MemoryAdaptiveDispatcher,
     RateLimiter, 
-    LLMConfig
+    LLMConfig,
+    UndetectedAdapter,
 )
 from crawl4ai.utils import perform_completion_with_backoff
 from crawl4ai.content_filter_strategy import (
@@ -33,6 +34,8 @@ from crawl4ai.content_filter_strategy import (
 )
 from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
 from crawl4ai.content_scraping_strategy import LXMLWebScrapingStrategy
+from crawl4ai.async_crawler_strategy import AsyncPlaywrightCrawlerStrategy
+from crawl4ai.async_dispatcher import MemoryAdaptiveDispatcher
 
 from utils import (
     TaskStatus,
@@ -212,7 +215,22 @@ async def handle_markdown_request(
 
         cache_mode = CacheMode.ENABLED if cache == "1" else CacheMode.WRITE_ONLY
 
-        async with AsyncWebCrawler() as crawler:
+        undetected_adapter = UndetectedAdapter()
+
+        browser_config = BrowserConfig(
+            headless=True,
+            enable_stealth=True,
+        )        
+
+        crawler_strategy = AsyncPlaywrightCrawlerStrategy(
+            browser_config=browser_config,
+            browser_adapter=undetected_adapter
+        )
+
+        async with AsyncWebCrawler(
+            crawler_strategy=crawler_strategy,
+            config=browser_config
+        ) as crawler:
             result = await crawler.arun(
                 url=decoded_url,
                 config=CrawlerRunConfig(
@@ -231,6 +249,69 @@ async def handle_markdown_request(
             return (result.markdown.raw_markdown 
                    if filter_type == FilterType.RAW 
                    else result.markdown.fit_markdown)
+
+    except Exception as e:
+        logger.error(f"Markdown error: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+async def handle_openwebui_request(
+    urls: List[str],
+) -> str:
+    """Handle openwebui requests."""
+    try:
+        cache_mode = CacheMode.WRITE_ONLY
+
+        md_generator = DefaultMarkdownGenerator(
+            options={"ignore_links": True}
+        )
+        
+        undetected_adapter = UndetectedAdapter()
+
+        browser_config = BrowserConfig(
+            headless=True,
+            enable_stealth=True,
+        )        
+
+        crawler_strategy = AsyncPlaywrightCrawlerStrategy(
+            browser_config=browser_config,
+            browser_adapter=undetected_adapter
+        )
+
+        dispatcher = MemoryAdaptiveDispatcher(
+            memory_threshold_percent=90.0,  # Pause if memory exceeds this
+            check_interval=1.0,             # How often to check memory
+            max_session_permit=20,          # Maximum concurrent tasks
+        )
+
+        async with AsyncWebCrawler(
+            crawler_strategy=crawler_strategy,
+            config=browser_config
+        ) as crawler:
+            results = await crawler.arun_many(
+                urls=urls,
+                config=CrawlerRunConfig(
+                    markdown_generator=md_generator,
+                    scraping_strategy=LXMLWebScrapingStrategy(),
+                    cache_mode=cache_mode
+                ),
+                dispatcher=dispatcher
+            )
+
+            response_list = []
+            
+            for result in results:
+                if result.success:
+                    response_list.append(dict(
+                        page_content=result.markdown.raw_markdown,
+                        metadata=dict(
+                            source=result.url,
+                        )
+                    ))
+
+            return response_list
 
     except Exception as e:
         logger.error(f"Markdown error: {str(e)}", exc_info=True)

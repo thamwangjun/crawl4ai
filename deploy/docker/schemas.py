@@ -17,6 +17,9 @@ class MarkdownRequest(BaseModel):
     c:   Optional[str] = Field("0",   description="Cache‑bust / revision counter")
     provider: Optional[str] = Field(None, description="LLM provider override (e.g., 'anthropic/claude-3-opus')")
 
+class OpenWebUIRequest(BaseModel):
+    urls: List[str] = Field(min_length=1)
+
 
 class RawCode(BaseModel):
     code: str

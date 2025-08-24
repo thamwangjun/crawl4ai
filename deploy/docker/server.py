@@ -18,13 +18,14 @@ import base64
 import re
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
 from api import (
-    handle_markdown_request, handle_llm_qa,
+    handle_markdown_request, handle_llm_qa, handle_openwebui_request,
     handle_stream_crawl_request, handle_crawl_request,
     stream_results
 )
 from schemas import (
     CrawlRequest,
     MarkdownRequest,
+    OpenWebUIRequest,
     RawCode,
     HTMLRequest,
     ScreenshotRequest,
@@ -251,6 +252,19 @@ async def get_markdown(
         "markdown": markdown,
         "success": True
     })
+
+@app.post("/openwebui")
+@limiter.limit(config["rate_limiting"]["default_limit"])
+@mcp_tool("md")
+async def get_for_openwebui(
+    request: Request,
+    body: OpenWebUIRequest,
+    _td: Dict = Depends(token_dep),
+):
+    response_list = await handle_openwebui_request(
+        urls=body.urls
+    )
+    return JSONResponse(response_list)
 
 
 @app.post("/html")
