@@ -36,6 +36,7 @@ from crawl4ai.markdown_generation_strategy import DefaultMarkdownGenerator
 from crawl4ai.content_scraping_strategy import LXMLWebScrapingStrategy
 from crawl4ai.async_crawler_strategy import AsyncPlaywrightCrawlerStrategy
 from crawl4ai.async_dispatcher import MemoryAdaptiveDispatcher
+from crawl4ai.content_filter_strategy import PruningContentFilter
 
 from utils import (
     TaskStatus,
@@ -264,8 +265,18 @@ async def handle_openwebui_request(
     try:
         cache_mode = CacheMode.WRITE_ONLY
 
+        prune_filter = PruningContentFilter(
+            # Lower → more content retained, higher → more content pruned
+            threshold=0.45,           
+            # "fixed" or "dynamic"
+            threshold_type="dynamic",  
+            # Ignore nodes with <5 words
+            min_word_threshold=5      
+        )
+
         md_generator = DefaultMarkdownGenerator(
-            options={"ignore_links": True}
+            options={"ignore_links": True},
+            content_filter=prune_filter
         )
         
         undetected_adapter = UndetectedAdapter()
@@ -305,7 +316,7 @@ async def handle_openwebui_request(
             for result in results:
                 if result.success:
                     response_list.append(dict(
-                        page_content=result.markdown.raw_markdown,
+                        page_content=result.markdown.fit_markdown,
                         metadata=dict(
                             source=result.url,
                         )
